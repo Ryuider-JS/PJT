@@ -388,19 +388,4 @@ if prompt := st.chat_input("질문을 입력하세요..."):
                     st.code(traceback.format_exc())
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
 
-# 초기 안내
-if not st.session_state.messages:
-    st.info("""
-    📋 **사용 방법:**
-    1. .env 파일에 OpenAI API Key를 설정하세요 (필수)
-    2. .env 파일에 Tavily API Key를 설정하세요 (선택사항, 시장조사 웹 검색용)
-    3. 분석할 파일을 업로드하세요 (CSV, PDF, DOCX 모두 가능, 복수 파일 선택 가능)
-    4. 질문을 입력하면 입력 자료와 질의 내용에 따라 자동으로 적절한 노드로 분기하여 처리됩니다
-    
-    **자동 노드 선택 기준:**
-    - 📊 **경영계획 분석**: CSV 파일 또는 "경영", "계획", "비용", "매출" 등의 키워드
-    - 🔍 **시장조사**: PDF 파일 또는 "시장", "경쟁", "조사" 등의 키워드
-    - 📝 **회의록 검색**: DOCX 파일 또는 "회의", "안전", "이슈" 등의 키워드
-    - 🗺️ **전략 로드맵 수립**: PDF 파일 + "로드맵", "3개년" 등의 키워드
-    """)
 
