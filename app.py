@@ -18,6 +18,7 @@ from meeting_docx_node import create_meeting_docx_chain
 from market_research_node import create_market_research_chain
 from strategy_plan_node import create_strategy_plan_chain
 from router_node import create_router_chain
+from email_node import create_email_chain
 
 if sys.platform == 'win32':
     os.environ['PYTHONIOENCODING'] = 'utf-8'
@@ -149,6 +150,20 @@ def initialize_strategy_plan_node(pdf_file_path: str, api_key: str, tavily_api_k
         return chain
     except Exception as e:
         st.error(f"❌ 전략 로드맵 노드 초기화 실패: {str(e)}")
+        return None
+
+
+def initialize_email_node(api_key: str, tavily_api_key: str = None):
+    """이메일 전송 노드 초기화"""
+    try:
+        chain = create_email_chain(
+            api_key=api_key,
+            tavily_api_key=tavily_api_key,
+            verbose=False
+        )
+        return chain
+    except Exception as e:
+        st.error(f"❌ 이메일 노드 초기화 실패: {str(e)}")
         return None
 
 
@@ -353,6 +368,18 @@ if prompt := st.chat_input("질문을 입력하세요..."):
                         else:
                             result = "❌ 전략 로드맵 노드 초기화에 실패했습니다."
                 
+                elif routed_node == "email":
+                    # 이메일 전송 노드
+                    chain = initialize_email_node(api_key, tavily_api_key)
+                    if chain:
+                        result = chain.invoke({"question": prompt})
+                    else:
+                        result = "❌ 이메일 노드 초기화에 실패했습니다."
+                
+                elif routed_node == "no_file_no_email":
+                    # 파일도 없고 이메일도 없는 경우
+                    result = "📁 데이터를 업로드해주세요."
+                
                 else:
                     result = "❌ 적절한 노드를 찾을 수 없습니다. 질의 내용이나 파일 타입을 확인해주세요."
                 
@@ -366,7 +393,10 @@ if prompt := st.chat_input("질문을 입력하세요..."):
                     })
                     
                     # 사용된 노드 정보 표시
-                    st.caption(f"📍 사용된 노드: {NODE_TYPES.get(routed_node, {}).get('name', '알 수 없음')}")
+                    node_name = NODE_TYPES.get(routed_node, {}).get('name', 
+                        '이메일 전송' if routed_node == "email" else 
+                        '알 수 없음' if routed_node != "no_file_no_email" else '파일 요청')
+                    st.caption(f"📍 사용된 노드: {node_name}")
                 
                 # 그래프 표시
                 if graph_created and os.path.exists("temp_plot.png"):

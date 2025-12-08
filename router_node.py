@@ -6,6 +6,7 @@ LLM 기반 라우터 노드 모듈
 import os
 import sys
 import tempfile
+import re
 from typing import TypedDict, List, Optional, Literal
 from langgraph.graph import StateGraph, END, START
 from langchain_core.messages import HumanMessage, BaseMessage
@@ -32,6 +33,30 @@ class RouterState(TypedDict):
     file_content: Optional[str]        # 추출된 파일 내용 (PDF/DOCX만)
     routed_node: Optional[str]         # 라우팅된 노드 타입
     messages: List[BaseMessage]        # 메시지 기록
+    has_email: bool                    # 이메일 주소 존재 여부
+
+
+def detect_email(text: str, verbose: bool = False) -> Optional[str]:
+    """
+    텍스트에서 이메일 주소 감지
+    
+    Args:
+        text: 검색할 텍스트
+        verbose: 상세 로그 출력 여부
+        
+    Returns:
+        이메일 주소가 있으면 이메일 주소, 없으면 None
+    """
+    # 이메일 주소 정규식 패턴 (한글과 영문이 섞인 경우도 고려)
+    # 단어 경계 대신 공백이나 특수문자, 한글 등을 경계로 사용
+    email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+    matches = re.findall(email_pattern, text)
+    
+    if matches:
+        if verbose:
+            print(f"🔍 이메일 감지됨: {matches}")
+        return matches[0]  # 첫 번째 이메일 주소 반환
+    return None
 
 
 def extract_file_content(file_obj, file_type: str) -> str:
@@ -96,34 +121,59 @@ def check_file_type_node(state: RouterState) -> RouterState:
     """
     파일 타입 확인 노드
     CSV 파일이 있으면 바로 business_plan으로 라우팅
+    파일이 없고 이메일이 있으면 email로 라우팅
     """
     uploaded_files = state.get("uploaded_files", {})
+    user_query = state.get("user_query", "")
+    
+    # 파일이 없는 경우 이메일 체크
+    if not any([uploaded_files.get("csv"), uploaded_files.get("pdf"), uploaded_files.get("docx")]):
+        email_address = detect_email(user_query, verbose=False)
+        if email_address:
+            return {
+                **state,
+                "file_type": None,
+                "has_email": True,
+                "routed_node": "email"
+            }
+        else:
+            # 파일도 없고 이메일도 없으면 특수 노드로 라우팅 (파일 요청)
+            return {
+                **state,
+                "file_type": None,
+                "has_email": False,
+                "routed_node": "no_file_no_email"
+            }
     
     # CSV 파일이 있으면 바로 business_plan으로 라우팅
     if uploaded_files.get("csv"):
         return {
             **state,
             "file_type": "csv",
-            "routed_node": "business_plan"
+            "routed_node": "business_plan",
+            "has_email": False
         }
     
     # PDF 또는 DOCX 파일이 있으면 내용 추출 필요
     if uploaded_files.get("pdf"):
         return {
             **state,
-            "file_type": "pdf"
+            "file_type": "pdf",
+            "has_email": False
         }
     
     if uploaded_files.get("docx"):
         return {
             **state,
-            "file_type": "docx"
+            "file_type": "docx",
+            "has_email": False
         }
     
     # 파일이 없으면 LLM이 사용자 질의만으로 판단하도록 진행
     return {
         **state,
-        "file_type": None
+        "file_type": None,
+        "has_email": False
     }
 
 
@@ -258,13 +308,21 @@ def create_router_chain(api_key: str = None, verbose: bool = False):
     # 시작 노드
     workflow.add_edge(START, "check_file_type")
     
-    # 조건부 분기: CSV면 바로 종료, 아니면 내용 추출 또는 LLM 라우팅
+    # 조건부 분기: CSV면 바로 종료, 이메일이면 바로 종료, 아니면 내용 추출 또는 LLM 라우팅
     def route_after_check(state: RouterState) -> str:
         routed_node = state.get("routed_node")
         file_type = state.get("file_type")
         
         # CSV 파일이면 바로 종료
         if routed_node == "business_plan" or file_type == "csv":
+            return "end"
+        
+        # 이메일 노드로 라우팅
+        if routed_node == "email":
+            return "end"
+        
+        # 파일이 없고 이메일도 없으면 종료 (파일 요청 메시지)
+        if routed_node == "no_file_no_email":
             return "end"
         
         # PDF/DOCX면 내용 추출 후 LLM 라우팅
@@ -310,6 +368,18 @@ def create_router_chain(api_key: str = None, verbose: bool = False):
                     print("✅ CSV 파일 감지 -> business_plan 노드로 라우팅")
                 return "business_plan"
             
+            # 파일이 없는 경우 이메일 체크 (우선 처리)
+            if not any([uploaded_files.get("csv"), uploaded_files.get("pdf"), uploaded_files.get("docx")]):
+                email_address = detect_email(user_query, verbose=verbose)
+                if email_address:
+                    if verbose:
+                        print(f"✅ 이메일 감지 ({email_address}) -> email 노드로 라우팅")
+                    return "email"
+                else:
+                    if verbose:
+                        print("⚠️ 파일도 없고 이메일도 없음 -> no_file_no_email 노드로 라우팅")
+                    return "no_file_no_email"
+            
             # PDF/DOCX 파일이 있는 경우 LangGraph 실행
             # 파일이 없어도 사용자 질의만으로 라우팅 가능
             result = app.invoke({
@@ -318,7 +388,8 @@ def create_router_chain(api_key: str = None, verbose: bool = False):
                 "file_type": None,
                 "file_content": None,
                 "routed_node": None,
-                "messages": []
+                "messages": [],
+                "has_email": False
             })
             
             routed_node = result.get("routed_node", "market_research")
