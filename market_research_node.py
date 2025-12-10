@@ -11,7 +11,7 @@ from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_classic.text_splitter import RecursiveCharacterTextSplitter
 from operator import itemgetter
@@ -149,7 +149,9 @@ def create_market_research_chain(pdf_file_paths: list = None, api_key: str = Non
         print(f"✅ {len(rec_docs)}개 청크로 분할 완료")
     
     # 임베딩 및 벡터스토어 생성
-    embeddings = OpenAIEmbeddings()
+    embeddings = OpenAIEmbeddings(
+        model="text-embedding-3-small"
+    )
     vectorstore = FAISS.from_documents(rec_docs, embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
     
